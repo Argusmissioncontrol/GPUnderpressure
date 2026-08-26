@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GPUnder Pressure",
-    "slug": "gpunder-pressure",
+    "slug": "gpunderpressure",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -16,11 +16,18 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.argusmissioncontrol.gpunderpressure"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "gpunderpressure"
+    "scheme": "gpunderpressure",
+    "extra": {
+      "eas": {
+        "projectId": "93437157-7f80-48d5-9892-86837f779729"
+      }
+    },
+    "owner": "gpunderpressures-team"
   }
 }
