@@ -1,6 +1,14 @@
 import { StatusBar } from "expo-status-bar";
 import * as ImagePicker from "expo-image-picker";
 import React, { useState } from "react";
+
+import {
+  ASPECT_RATIOS,
+  type AspectRatio,
+  type GenerationMode,
+} from "./src/api/types";
+import { mockGenerationClient } from "./src/api/mockClient";
+
 import {
   Image,
   Pressable,
@@ -13,17 +21,7 @@ import {
   View,
 } from "react-native";
 
-type GenerationMode = "image" | "reference";
 
-const ASPECT_RATIOS = [
-  "1:1",
-  "16:9",
-  "4:3",
-  "3:4",
-] as const;
-
-type AspectRatio =
-  (typeof ASPECT_RATIOS)[number];
 
 export default function App() {
   const [mode, setMode] =
@@ -85,7 +83,7 @@ export default function App() {
     );
   }
 
-  function handleGenerate() {
+  async function handleGenerate() {
     if (requestInFlight) {
       return;
     }
@@ -155,13 +153,13 @@ export default function App() {
       "Request prepared · backend offline"
     );
 
-    setTimeout(() => {
-      setRequestInFlight(false);
+    await mockGenerationClient.submit(request);
 
-      setStatus(
-        "Ready · backend not connected"
-      );
-    }, 1200);
+    setRequestInFlight(false);
+
+    setStatus(
+      "Ready · backend not connected"
+    );
   }
 
   return (
