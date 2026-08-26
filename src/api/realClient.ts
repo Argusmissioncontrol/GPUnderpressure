@@ -5,7 +5,7 @@ import type {
 } from "./types";
 
 const BASE_URL =
-    "http://127.0.0.1:8080";
+  "https://andromeda.tailbb20c1.ts.net";
 
 function sleep(ms: number) {
   return new Promise((resolve) =>
