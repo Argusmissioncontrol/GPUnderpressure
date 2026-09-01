@@ -1,116 +1,220 @@
 import { StatusBar } from "expo-status-bar";
-import * as ImagePicker from "expo-image-picker";
-import React, { useState } from "react";
-import * as FileSystem from "expo-file-system/legacy";
-import * as MediaLibrary from "expo-media-library/legacy";
+
+import React, {
+  useState,
+} from "react";
+
+import * as FileSystem
+  from "expo-file-system/legacy";
+
+import * as MediaLibrary
+  from "expo-media-library/legacy";
 
 import {
-  ASPECT_RATIOS,
-  type AspectRatio,
-  type GenerationMode,
-} from "./src/api/types";
-import { realGenerationClient } from "./src/api/realClient";
-
-import {
+  ActivityIndicator,
   Image,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
 } from "react-native";
 
+import {
+  ASPECT_RATIOS,
+  type AspectRatio,
+  type GenerationRequest,
+} from "./src/api/types";
+
+import {
+  realGenerationClient,
+  RemoteApiError,
+} from "./src/api/realClient";
+
+
+type RunState =
+  | "idle"
+  | "submitting"
+  | "queued"
+  | "running"
+  | "success"
+  | "error";
+
+
+const RATIO_LABELS: Record<
+  AspectRatio,
+  string
+> = {
+  "1:1": "Square",
+  "16:9": "Wide",
+  "4:3": "Classic",
+  "9:16": "Portrait",
+};
+
+
+function friendlyGenerationError(
+  error: unknown
+): string {
+  if (
+    error instanceof RemoteApiError
+  ) {
+    if (error.status === 429) {
+      return (
+        "Remote queue is busy. Let the active host job finish, then try again."
+      );
+    }
+
+    if (error.status === 403) {
+      return (
+        "Tailscale identity was rejected. Check Tailscale on both devices."
+      );
+    }
+
+    return error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return (
+    "Generation failed for an unknown reason."
+  );
+}
 
 
 export default function App() {
-  const [mode, setMode] =
-    useState<GenerationMode>("image");
+  const [
+    prompt,
+    setPrompt,
+  ] = useState("");
 
-  const [prompt, setPrompt] =
-    useState("");
+  const [
+    aspectRatio,
+    setAspectRatio,
+  ] = useState<AspectRatio>("1:1");
 
-  const [aspectRatio, setAspectRatio] =
-    useState<AspectRatio>("1:1");
+  const [
+    seedMode,
+    setSeedMode,
+  ] = useState<
+    "random" | "fixed"
+  >("random");
 
-  const [seed, setSeed] =
-    useState("-1");
+  const [
+    seed,
+    setSeed,
+  ] = useState("");
 
-  const [referenceUri, setReferenceUri] =
-    useState<string | null>(null);
+  const [
+    resultUri,
+    setResultUri,
+  ] = useState<string | null>(
+    null
+  );
 
-  const [resultUri, setResultUri] =
-    useState<string | null>(null);
-  const [saveState, setSaveState] =
-    useState<"idle" | "saving" | "saved">("idle");
+  const [
+    saveState,
+    setSaveState,
+  ] = useState<
+    "idle" | "saving" | "saved"
+  >("idle");
 
-  const [status, setStatus] =
-    useState("Ready");
+  const [
+    runState,
+    setRunState,
+  ] = useState<RunState>(
+    "idle"
+  );
 
-  const [requestInFlight, setRequestInFlight] =
-    useState(false);
+  const [
+    status,
+    setStatus,
+  ] = useState(
+    "Ready. Host-controlled Z-Turbo route."
+  );
 
-  const usingReference =
-    mode === "reference";
 
-  function changeMode(reference: boolean) {
-    setMode(
-      reference
-        ? "reference"
-        : "image"
+  const requestInFlight =
+    runState === "submitting" ||
+    runState === "queued" ||
+    runState === "running";
+
+
+  function setProgress(
+    phase:
+      | "submitting"
+      | "queued"
+      | "running"
+  ) {
+    setRunState(
+      phase
     );
 
-    setStatus(
-      reference
-        ? "Reference image mode"
-        : "Image mode"
-    );
-  }
-
-  async function chooseReferenceImage() {
-    const result =
-      await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsEditing: false,
-        quality: 1,
-      });
-
-    if (result.canceled) {
+    if (
+      phase === "submitting"
+    ) {
+      setStatus(
+        "Contacting Local Gen Studio..."
+      );
       return;
     }
 
-    setReferenceUri(
-      result.assets[0].uri
-    );
+    if (
+      phase === "queued"
+    ) {
+      setStatus(
+        "Accepted by LGS. Waiting for the host queue."
+      );
+      return;
+    }
 
     setStatus(
-      "Reference image selected ✓"
+      "Generation is running on the home GPU."
     );
   }
+
+
   async function saveResultImage() {
-    if (!resultUri) {
-      return;
-    }
-    if (saveState === "saving") {
+    if (
+      !resultUri ||
+      saveState === "saving"
+    ) {
       return;
     }
 
-    setSaveState("saving");
+    setSaveState(
+      "saving"
+    );
+
     try {
-      setStatus("Saving image...");
+      setStatus(
+        "Saving image..."
+      );
 
       const permission =
-        await MediaLibrary.requestPermissionsAsync();
+        await MediaLibrary
+          .requestPermissionsAsync();
 
-      if (!permission.granted) {
-        setStatus("Photo permission denied.");
-        setSaveState("idle");
+      if (
+        !permission.granted
+      ) {
+        setStatus(
+          "Photo permission denied."
+        );
+
+        setSaveState(
+          "idle"
+        );
+
         return;
       }
 
-      if (!FileSystem.cacheDirectory) {
+      if (
+        !FileSystem.cacheDirectory
+      ) {
         throw new Error(
           "Temporary storage is unavailable."
         );
@@ -121,412 +225,767 @@ export default function App() {
         `gpunder-pressure-${Date.now()}.png`;
 
       const download =
-        await FileSystem.downloadAsync(
-          resultUri,
-          destination
+        await FileSystem
+          .downloadAsync(
+            resultUri,
+            destination
+          );
+
+      await MediaLibrary
+        .saveToLibraryAsync(
+          download.uri
         );
 
-      await MediaLibrary.saveToLibraryAsync(
-        download.uri
+      setStatus(
+        "Saved to gallery."
       );
 
-      setStatus("Saved to gallery ✓");
-      setSaveState("saved");
+      setSaveState(
+        "saved"
+      );
     } catch (error) {
       console.error(
         "GPUnder Pressure save failed:",
         error
       );
 
-      setStatus("Could not save image.");
-      setSaveState("idle");
+      setStatus(
+        "Could not save image."
+      );
+
+      setSaveState(
+        "idle"
+      );
     }
   }
 
+
   async function handleGenerate() {
-    if (requestInFlight) {
+    if (
+      requestInFlight
+    ) {
       return;
     }
 
-    if (!prompt.trim()) {
+    const cleanPrompt =
+      prompt.trim();
+
+    if (
+      !cleanPrompt
+    ) {
+      setRunState(
+        "error"
+      );
+
       setStatus(
         "Enter a prompt first."
       );
+
       return;
     }
+
+    const cleanSeed =
+      seed.trim();
 
     if (
-      usingReference &&
-      !referenceUri
+      seedMode === "fixed" &&
+      !/^\d+$/.test(
+        cleanSeed
+      )
     ) {
-      setStatus(
-        "Reference Image mode requires an image."
+      setRunState(
+        "error"
       );
+
+      setStatus(
+        "Fixed seed must be a non-negative whole number."
+      );
+
       return;
     }
 
-    const request = {
-      requestId:
-        `${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}`,
+    const request:
+      GenerationRequest = {
+        requestId:
+          `${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2)}`,
 
-      generationType: mode,
+        generationType:
+          "image",
 
-      prompt:
-        prompt.trim(),
+        prompt:
+          cleanPrompt,
 
-      aspectRatio,
+        aspectRatio,
 
-      seed:
-        seed.trim() || "-1",
+        seed:
+          seedMode === "random"
+            ? "-1"
+            : cleanSeed,
 
-      referenceUri:
-        usingReference
-          ? referenceUri
-          : null,
-    };
+        referenceUri:
+          null,
+      };
 
     console.log(
       "GPUnder Pressure request:",
       request
     );
 
-    setRequestInFlight(true);
+    setRunState(
+      "submitting"
+    );
 
-   setStatus("Generating...");
+    setStatus(
+      "Contacting Local Gen Studio..."
+    );
 
     try {
       const result =
-        await realGenerationClient.submit(request);
+        await realGenerationClient.submit(
+          request,
+          setProgress
+        );
 
-      console.log(
-        "GPUnder Pressure result:",
-        result
-      );
+      if (
+        result.resultUrl
+      ) {
+        setResultUri(
+          result.resultUrl
+        );
 
-      if (result.resultUrl) {
-        setResultUri(result.resultUrl);
-        setSaveState("idle");
+        setSaveState(
+          "idle"
+        );
       }
 
-      setStatus("Ready");
+      setRunState(
+        "success"
+      );
+
+      setStatus(
+        "Generation complete."
+      );
     } catch (error) {
       console.error(
         "GPUnder Pressure generation failed:",
         error
       );
 
-      setStatus("Generation failed.");
-    } finally {
-      setRequestInFlight(false);
-    }
-    }
+      setRunState(
+        "error"
+      );
 
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
+      setStatus(
+        friendlyGenerationError(
+          error
+        )
+      );
+    }
+  }
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={
-            styles.content
+
+  const statusHint =
+    runState === "submitting"
+      ? "Sending the request over Tailscale."
+      : runState === "queued"
+        ? "The host accepted it. ComfyUI still owns execution order."
+        : runState === "running"
+          ? "The host reports an active generation job."
+          : runState === "success"
+            ? "The result returned from Local Gen Studio."
+            : runState === "error"
+              ? "This is the actual client/API failure."
+              : "Heavy generation controls stay on the host.";
+
+
+  return (
+    <SafeAreaView
+      style={
+        styles.safeArea
+      }
+    >
+      <StatusBar
+        style="light"
+      />
+
+      <ScrollView
+        style={
+          styles.scroll
+        }
+        contentContainerStyle={
+          styles.content
+        }
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          style={
+            styles.header
           }
-          keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
-            <Text style={styles.title}>
-              GPUnder Pressure
-            </Text>
-
-            <Text style={styles.subtitle}>
-              please be kind, my 3060 thanks you.
-            </Text>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>
-              Image Generation
-            </Text>
-
-            <View style={styles.divider} />
-
-            <Text style={styles.label}>
-              Generation type
-            </Text>
-
-            <View style={styles.modeRow}>
+          <View
+            style={
+              styles.headerTop
+            }
+          >
+            <View>
               <Text
-                style={[
-                  styles.modeLabel,
-                  !usingReference &&
-                  styles.modeLabelActive,
-                ]}
+                style={
+                  styles.title
+                }
               >
-                Image
+                GPUnder Pressure
               </Text>
 
-              <Switch
-                value={usingReference}
-                onValueChange={changeMode}
+              <Text
+                style={
+                  styles.subtitle
+                }
+              >
+                please be kind, my 3060 thanks you.
+              </Text>
+            </View>
+
+            <View
+              style={
+                styles.routeBadge
+              }
+            >
+              <View
+                style={
+                  styles.routeDot
+                }
               />
 
               <Text
-                style={[
-                  styles.modeLabel,
-                  usingReference &&
-                  styles.modeLabelActive,
-                ]}
+                style={
+                  styles.routeText
+                }
               >
-                Reference
+                REMOTE
               </Text>
             </View>
+          </View>
 
-            <Text style={styles.label}>
-              Prompt
+          <View
+            style={
+              styles.engineBar
+            }
+          >
+            <Text
+              style={
+                styles.engineEyebrow
+              }
+            >
+              ACTIVE ROUTE
             </Text>
 
-            <TextInput
-              style={styles.promptInput}
-              value={prompt}
-              onChangeText={setPrompt}
-              placeholder="Describe what you want to generate..."
-              placeholderTextColor="#717784"
-              multiline
-              textAlignVertical="top"
-            />
-
-            {usingReference && (
-              <>
-                <Text style={styles.label}>
-                  Reference image
-                </Text>
-
-                <Pressable
-                  style={styles.referenceBox}
-                  onPress={
-                    chooseReferenceImage
-                  }
-                >
-                  {referenceUri ? (
-                    <Image
-                      source={{
-                        uri: referenceUri,
-                      }}
-                      style={
-                        styles.referenceImage
-                      }
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <View
-                      style={
-                        styles.referenceEmpty
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.referenceTitle
-                        }
-                      >
-                        Choose reference image
-                      </Text>
-
-                      <Text
-                        style={
-                          styles.referenceHint
-                        }
-                      >
-                        Tap to select from your phone
-                      </Text>
-                    </View>
-                  )}
-                </Pressable>
-              </>
-            )}
-
-            <Text style={styles.label}>
-              Aspect ratio
+            <Text
+              style={
+                styles.engineName
+              }
+            >
+              Z-Turbo
             </Text>
 
-            <View style={styles.ratioGrid}>
-              {ASPECT_RATIOS.map(
-                (ratio) => {
-                  const selected =
-                    ratio === aspectRatio;
+            <Text
+              style={
+                styles.engineMeta
+              }
+            >
+              Host controlled
+            </Text>
+          </View>
+        </View>
 
-                  return (
-                    <Pressable
-                      key={ratio}
-                      onPress={() =>
-                        setAspectRatio(
-                          ratio
-                        )
-                      }
-                      style={[
-                        styles.ratioButton,
-                        selected &&
+
+        <View
+          style={
+            styles.card
+          }
+        >
+          <Text
+            style={
+              styles.eyebrow
+            }
+          >
+            IMAGE GENERATION
+          </Text>
+
+          <Text
+            style={
+              styles.cardTitle
+            }
+          >
+            Create on the home GPU
+          </Text>
+
+          <Text
+            style={
+              styles.cardIntro
+            }
+          >
+            Prompt here. The expensive knobs stay safely on Local Gen Studio.
+          </Text>
+
+
+          <Text
+            style={
+              styles.label
+            }
+          >
+            Prompt
+          </Text>
+
+          <TextInput
+            style={
+              styles.promptInput
+            }
+            value={
+              prompt
+            }
+            onChangeText={
+              setPrompt
+            }
+            placeholder="Describe what you want to generate..."
+            placeholderTextColor="#626a78"
+            multiline
+            textAlignVertical="top"
+          />
+
+
+          <Text
+            style={
+              styles.label
+            }
+          >
+            Aspect ratio
+          </Text>
+
+          <View
+            style={
+              styles.ratioGrid
+            }
+          >
+            {ASPECT_RATIOS.map(
+              (ratio) => {
+                const selected =
+                  ratio ===
+                  aspectRatio;
+
+                return (
+                  <Pressable
+                    key={
+                      ratio
+                    }
+                    onPress={() =>
+                      setAspectRatio(
+                        ratio
+                      )
+                    }
+                    style={({
+                      pressed,
+                    }) => [
+                      styles.ratioButton,
+                      selected &&
                         styles.ratioButtonActive,
+                      pressed &&
+                        styles.controlPressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.ratioValue,
+                        selected &&
+                          styles.ratioValueActive,
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.ratioText,
-                          selected &&
-                          styles.ratioTextActive,
-                        ]}
-                      >
-                        {ratio}
-                      </Text>
-                    </Pressable>
-                  );
-                }
-              )}
-            </View>
+                      {ratio}
+                    </Text>
 
-            <View style={styles.seedHeader}>
-              <Text style={styles.label}>
-                Seed
-              </Text>
+                    <Text
+                      style={[
+                        styles.ratioLabel,
+                        selected &&
+                          styles.ratioLabelActive,
+                      ]}
+                    >
+                      {
+                        RATIO_LABELS[
+                          ratio
+                        ]
+                      }
+                    </Text>
+                  </Pressable>
+                );
+              }
+            )}
+          </View>
 
-              <Text style={styles.hint}>
-                -1 = random
-              </Text>
-            </View>
 
+          <Text
+            style={
+              styles.label
+            }
+          >
+            Seed
+          </Text>
+
+          <View
+            style={
+              styles.segmented
+            }
+          >
+            {[
+              "random",
+              "fixed",
+            ].map(
+              (mode) => {
+                const selected =
+                  seedMode ===
+                  mode;
+
+                return (
+                  <Pressable
+                    key={
+                      mode
+                    }
+                    onPress={() =>
+                      setSeedMode(
+                        mode as
+                          | "random"
+                          | "fixed"
+                      )
+                    }
+                    style={[
+                      styles.segmentButton,
+                      selected &&
+                        styles.segmentButtonActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        selected &&
+                          styles.segmentTextActive,
+                      ]}
+                    >
+                      {mode ===
+                      "random"
+                        ? "Random"
+                        : "Fixed"}
+                    </Text>
+                  </Pressable>
+                );
+              }
+            )}
+          </View>
+
+          {seedMode ===
+            "fixed" && (
             <TextInput
-              style={styles.seedInput}
-              value={seed}
-              onChangeText={setSeed}
-              keyboardType="numbers-and-punctuation"
-              placeholder="-1"
-              placeholderTextColor="#717784"
+              style={
+                styles.seedInput
+              }
+              value={
+                seed
+              }
+              onChangeText={
+                setSeed
+              }
+              keyboardType="number-pad"
+              placeholder="Enter seed"
+              placeholderTextColor="#626a78"
             />
+          )}
 
-            <Pressable
-              onPress={handleGenerate}
-              disabled={requestInFlight}
-              style={({ pressed }) => [
-                styles.generateButton,
 
-                requestInFlight &&
+          <Pressable
+            onPress={
+              handleGenerate
+            }
+            disabled={
+              requestInFlight
+            }
+            style={({
+              pressed,
+            }) => [
+              styles.generateButton,
+              requestInFlight &&
                 styles.generateButtonDisabled,
-
-                pressed &&
+              pressed &&
                 !requestInFlight &&
                 styles.generateButtonPressed,
-              ]}
+            ]}
+          >
+            {requestInFlight ? (
+              <ActivityIndicator
+                color="#ffffff"
+                size="small"
+              />
+            ) : (
+              <View
+                style={
+                  styles.generateDot
+                }
+              />
+            )}
+
+            <Text
+              style={
+                styles.generateButtonText
+              }
             >
+              {
+                runState ===
+                "submitting"
+                  ? "SUBMITTING"
+                  : runState ===
+                      "queued"
+                    ? "QUEUED"
+                    : runState ===
+                        "running"
+                      ? "GENERATING"
+                      : "GENERATE IMAGE"
+              }
+            </Text>
+          </Pressable>
+
+
+          <View
+            style={[
+              styles.statusPanel,
+              runState ===
+                "error" &&
+                styles.statusPanelError,
+              runState ===
+                "success" &&
+                styles.statusPanelSuccess,
+              requestInFlight &&
+                styles.statusPanelWorking,
+            ]}
+          >
+            <View
+              style={
+                styles.statusHeader
+              }
+            >
+              <View
+                style={[
+                  styles.statusIndicator,
+                  runState ===
+                    "error" &&
+                    styles.statusIndicatorError,
+                  runState ===
+                    "success" &&
+                    styles.statusIndicatorSuccess,
+                  requestInFlight &&
+                    styles.statusIndicatorWorking,
+                ]}
+              />
+
               <Text
                 style={
-                  styles.generateButtonText
+                  styles.statusText
                 }
               >
-                {requestInFlight
-                  ? "Queued..."
-                  : "Generate"}
+                {status}
               </Text>
-            </Pressable>
-
-            <Text style={styles.status}>
-              {status}
-            </Text>
-          </View>
-
-          <View style={styles.outputCard}>
-            <Text style={styles.sectionTitle}>
-              Output
-            </Text>
-
-            <View style={styles.divider} />
-
-            <View style={styles.output}>
-              {resultUri ? (
-                <>
-                  <Image
-                    source={{ uri: resultUri }}
-                    style={{
-                      width: "100%",
-                      height: 320,
-                      borderRadius: 10,
-                    }}
-                    resizeMode="contain"
-                  />
-
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      gap: 10,
-                      marginTop: 12,
-                    }}
-                  >
-                    <Pressable
-                      onPress={saveResultImage}
-                      disabled={saveState === "saving"}
-                      style={[
-                        styles.generateButton,
-                        { flex: 1 },
-                        saveState === "saving" &&
-                        styles.generateButtonDisabled,
-                      ]}
-                    >
-                      <Text style={styles.generateButtonText}>
-                        {saveState === "saving"
-                          ? "Saving..."
-                          : saveState === "saved"
-                            ? "Saved ✓"
-                            : "Save to Gallery"}
-                      </Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={() => {
-                        setResultUri(null);
-                        setSaveState("idle");
-                        setStatus("Output cleared.");
-                      }}
-                      style={[
-                        styles.generateButton,
-                        { flex: 1 },
-                      ]}
-                    >
-                      <Text style={styles.generateButtonText}>
-                        Clear Output
-                      </Text>
-                    </Pressable>
-                  </View>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.outputSymbol}>
-                    ◇
-                  </Text>
-
-                  <Text style={styles.outputTitle}>
-                    No generation yet
-                  </Text>
-
-                  <Text style={styles.outputHint}>
-                    Your image will appear here.
-                  </Text>
-                </>
-              )}
             </View>
+
+            <Text
+              style={
+                styles.statusHint
+              }
+            >
+              {statusHint}
+            </Text>
+          </View>
+        </View>
+
+
+        <View
+          style={
+            styles.outputCard
+          }
+        >
+          <View
+            style={
+              styles.outputHeader
+            }
+          >
+            <View>
+              <Text
+                style={
+                  styles.eyebrow
+                }
+              >
+                RESULT
+              </Text>
+
+              <Text
+                style={
+                  styles.outputHeading
+                }
+              >
+                Latest output
+              </Text>
+            </View>
+
+            {resultUri && (
+              <View
+                style={
+                  styles.readyBadge
+                }
+              >
+                <Text
+                  style={
+                    styles.readyText
+                  }
+                >
+                  READY
+                </Text>
+              </View>
+            )}
           </View>
 
-          <Text style={styles.safetyNote}>
-            GPU-heavy settings are controlled
-            by the host.
-          </Text>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+          <View
+            style={
+              styles.output
+            }
+          >
+            {resultUri ? (
+              <>
+                <Image
+                  source={{
+                    uri:
+                      resultUri,
+                  }}
+                  style={
+                    styles.resultImage
+                  }
+                  resizeMode="contain"
+                />
 
-  const styles = StyleSheet.create({
+                <View
+                  style={
+                    styles.outputActions
+                  }
+                >
+                  <Pressable
+                    onPress={
+                      saveResultImage
+                    }
+                    disabled={
+                      saveState ===
+                      "saving"
+                    }
+                    style={
+                      styles.secondaryButton
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.secondaryButtonText
+                      }
+                    >
+                      {saveState ===
+                      "saving"
+                        ? "Saving..."
+                        : saveState ===
+                            "saved"
+                          ? "Saved"
+                          : "Save to Gallery"}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => {
+                      setResultUri(
+                        null
+                      );
+
+                      setSaveState(
+                        "idle"
+                      );
+
+                      setRunState(
+                        "idle"
+                      );
+
+                      setStatus(
+                        "Output cleared."
+                      );
+                    }}
+                    style={
+                      styles.ghostButton
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.ghostButtonText
+                      }
+                    >
+                      Clear
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <View
+                style={
+                  styles.emptyOutput
+                }
+              >
+                <Text
+                  style={
+                    styles.outputSymbol
+                  }
+                >
+                  ◇
+                </Text>
+
+                <Text
+                  style={
+                    styles.outputTitle
+                  }
+                >
+                  No image yet
+                </Text>
+
+                <Text
+                  style={
+                    styles.outputHint
+                  }
+                >
+                  The latest remote result will land here.
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+
+        <Text
+          style={
+            styles.footer
+          }
+        >
+          Tailscale → Local Gen Studio → ComfyUI → RTX 3060
+        </Text>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+
+const styles =
+  StyleSheet.create({
     safeArea: {
       flex: 1,
-      backgroundColor: "#090b0f",
+      backgroundColor:
+        "#080a0e",
     },
 
     scroll: {
@@ -534,245 +993,579 @@ export default function App() {
     },
 
     content: {
-      padding: 18,
-      paddingBottom: 40,
+      paddingHorizontal: 16,
+      paddingTop: 18,
+      paddingBottom: 44,
     },
 
     header: {
-      marginBottom: 22,
-    },
-
-    title: {
-      color: "#f5f6f8",
-      fontSize: 26,
-      fontWeight: "800",
-    },
-
-    subtitle: {
-      color: "#868d99",
-      marginTop: 4,
-      fontSize: 13,
-    },
-
-    card: {
-      backgroundColor: "#12151b",
-      borderWidth: 1,
-      borderColor: "#292f3a",
-      borderRadius: 16,
-      padding: 18,
-      marginBottom: 16,
-    },
-
-    outputCard: {
-      backgroundColor: "#12151b",
-      borderWidth: 1,
-      borderColor: "#292f3a",
-      borderRadius: 16,
-      padding: 18,
-    },
-
-    sectionTitle: {
-      color: "#f5f6f8",
-      fontSize: 15,
-      fontWeight: "700",
-    },
-
-    divider: {
-      height: 1,
-      backgroundColor: "#292f3a",
-      marginTop: 14,
       marginBottom: 18,
     },
 
-    label: {
-      color: "#cdd3dc",
-      fontSize: 13,
-      fontWeight: "700",
-      marginBottom: 8,
+    headerTop: {
+      flexDirection:
+        "row",
+      justifyContent:
+        "space-between",
+      alignItems:
+        "flex-start",
     },
 
-    modeRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 12,
-      marginBottom: 22,
+    title: {
+      color:
+        "#f4f5f8",
+      fontSize: 27,
+      fontWeight:
+        "900",
     },
 
-    modeLabel: {
-      color: "#737b88",
-      fontSize: 13,
-      fontWeight: "700",
-    },
-
-    modeLabelActive: {
-      color: "#f5f6f8",
-    },
-
-    promptInput: {
-      minHeight: 130,
-      backgroundColor: "#0d1015",
-      borderWidth: 1,
-      borderColor: "#292f3a",
-      borderRadius: 10,
-      color: "#f5f6f8",
-      padding: 12,
-      fontSize: 15,
-      marginBottom: 20,
-    },
-
-    referenceBox: {
-      minHeight: 150,
-      backgroundColor: "#0d1015",
-      borderWidth: 1,
-      borderStyle: "dashed",
-      borderColor: "#3a424f",
-      borderRadius: 10,
-      overflow: "hidden",
-      marginBottom: 20,
-      justifyContent: "center",
-    },
-
-    referenceEmpty: {
-      alignItems: "center",
-      padding: 20,
-    },
-
-    referenceTitle: {
-      color: "#dfe3e8",
-      fontWeight: "700",
-      fontSize: 13,
-    },
-
-    referenceHint: {
-      color: "#737b88",
-      marginTop: 5,
+    subtitle: {
+      color:
+        "#727a88",
+      marginTop: 4,
       fontSize: 12,
     },
 
-    referenceImage: {
-      width: "100%",
-      height: 220,
+    routeBadge: {
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
+      gap: 6,
+      borderWidth: 1,
+      borderColor:
+        "#2b3240",
+      backgroundColor:
+        "#11151c",
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+    },
+
+    routeDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+      backgroundColor:
+        "#8a7cff",
+    },
+
+    routeText: {
+      color:
+        "#a9afbb",
+      fontSize: 10,
+      fontWeight:
+        "800",
+      letterSpacing: 1.1,
+    },
+
+    engineBar: {
+      marginTop: 18,
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
+      gap: 9,
+      backgroundColor:
+        "#0e1117",
+      borderWidth: 1,
+      borderColor:
+        "#222936",
+      borderRadius: 12,
+      paddingHorizontal: 13,
+      paddingVertical: 11,
+    },
+
+    engineEyebrow: {
+      color:
+        "#636b79",
+      fontSize: 9,
+      fontWeight:
+        "800",
+      letterSpacing: 1,
+    },
+
+    engineName: {
+      color:
+        "#ddd9ff",
+      fontSize: 13,
+      fontWeight:
+        "800",
+    },
+
+    engineMeta: {
+      color:
+        "#626a78",
+      fontSize: 11,
+      marginLeft:
+        "auto",
+    },
+
+    card: {
+      backgroundColor:
+        "#11141a",
+      borderWidth: 1,
+      borderColor:
+        "#262d38",
+      borderRadius: 18,
+      padding: 17,
+      marginBottom: 14,
+    },
+
+    eyebrow: {
+      color:
+        "#7c70d9",
+      fontSize: 10,
+      fontWeight:
+        "900",
+      letterSpacing: 1.4,
+    },
+
+    cardTitle: {
+      color:
+        "#f4f5f8",
+      fontSize: 19,
+      fontWeight:
+        "800",
+      marginTop: 6,
+    },
+
+    cardIntro: {
+      color:
+        "#767e8b",
+      fontSize: 12,
+      lineHeight: 18,
+      marginTop: 5,
+      marginBottom: 22,
+    },
+
+    label: {
+      color:
+        "#d2d6dd",
+      fontSize: 12,
+      fontWeight:
+        "800",
+      marginBottom: 8,
+    },
+
+    promptInput: {
+      minHeight: 145,
+      backgroundColor:
+        "#0b0e13",
+      borderWidth: 1,
+      borderColor:
+        "#292f3b",
+      borderRadius: 12,
+      color:
+        "#f4f5f8",
+      padding: 13,
+      fontSize: 15,
+      lineHeight: 21,
+      marginBottom: 20,
     },
 
     ratioGrid: {
-      flexDirection: "row",
-      gap: 8,
+      flexDirection:
+        "row",
+      gap: 7,
       marginBottom: 22,
     },
 
     ratioButton: {
       flex: 1,
-      minHeight: 43,
-      borderRadius: 9,
+      minHeight: 58,
+      borderRadius: 11,
       borderWidth: 1,
-      borderColor: "#292f3a",
-      backgroundColor: "#171b22",
-      alignItems: "center",
-      justifyContent: "center",
+      borderColor:
+        "#292f3b",
+      backgroundColor:
+        "#151920",
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
     },
 
     ratioButtonActive: {
-      borderColor: "#7c6cff",
-      backgroundColor: "#26213e",
+      borderColor:
+        "#8275ff",
+      backgroundColor:
+        "#211d35",
     },
 
-    ratioText: {
-      color: "#858d9a",
-      fontWeight: "700",
+    ratioValue: {
+      color:
+        "#b0b6c0",
+      fontWeight:
+        "800",
       fontSize: 12,
     },
 
-    ratioTextActive: {
-      color: "#ffffff",
+    ratioValueActive: {
+      color:
+        "#ffffff",
     },
 
-    seedHeader: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
+    ratioLabel: {
+      color:
+        "#626a78",
+      fontSize: 9,
+      marginTop: 3,
     },
 
-    hint: {
-      color: "#737b88",
-      fontSize: 11,
-      marginBottom: 8,
+    ratioLabelActive: {
+      color:
+        "#a9a0e8",
+    },
+
+    segmented: {
+      flexDirection:
+        "row",
+      padding: 3,
+      borderRadius: 11,
+      backgroundColor:
+        "#0b0e13",
+      borderWidth: 1,
+      borderColor:
+        "#292f3b",
+      marginBottom: 12,
+    },
+
+    segmentButton: {
+      flex: 1,
+      height: 38,
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
+      borderRadius: 8,
+    },
+
+    segmentButtonActive: {
+      backgroundColor:
+        "#25203c",
+    },
+
+    segmentText: {
+      color:
+        "#737b88",
+      fontSize: 12,
+      fontWeight:
+        "700",
+    },
+
+    segmentTextActive: {
+      color:
+        "#f4f2ff",
     },
 
     seedInput: {
       height: 45,
-      backgroundColor: "#0d1015",
+      backgroundColor:
+        "#0b0e13",
       borderWidth: 1,
-      borderColor: "#292f3a",
+      borderColor:
+        "#292f3b",
       borderRadius: 10,
-      color: "#f5f6f8",
+      color:
+        "#f4f5f8",
       paddingHorizontal: 12,
-      fontSize: 15,
-      marginBottom: 18,
+      fontSize: 14,
+      marginBottom: 14,
     },
 
     generateButton: {
-      height: 50,
-      borderRadius: 10,
-      backgroundColor: "#7c6cff",
-      alignItems: "center",
-      justifyContent: "center",
+      marginTop: 7,
+      height: 52,
+      flexDirection:
+        "row",
+      gap: 10,
+      borderRadius: 11,
+      backgroundColor:
+        "#7667f4",
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
     },
 
     generateButtonPressed: {
-      opacity: 0.85,
+      transform: [
+        {
+          scale: 0.985,
+        },
+      ],
+      opacity: 0.9,
     },
 
     generateButtonDisabled: {
-      opacity: 0.45,
+      opacity: 0.58,
+    },
+
+    generateDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+      backgroundColor:
+        "#ffffff",
     },
 
     generateButtonText: {
-      color: "#ffffff",
-      fontWeight: "800",
-      fontSize: 15,
+      color:
+        "#ffffff",
+      fontWeight:
+        "900",
+      fontSize: 13,
+      letterSpacing: 0.7,
     },
 
-    status: {
-      color: "#858d9a",
-      fontSize: 12,
+    statusPanel: {
       marginTop: 12,
-      textAlign: "center",
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor:
+        "#282e39",
+      backgroundColor:
+        "#0c0f14",
+      padding: 12,
+    },
+
+    statusPanelWorking: {
+      borderColor:
+        "#433c78",
+      backgroundColor:
+        "#111020",
+    },
+
+    statusPanelSuccess: {
+      borderColor:
+        "#274738",
+      backgroundColor:
+        "#0c1712",
+    },
+
+    statusPanelError: {
+      borderColor:
+        "#60343a",
+      backgroundColor:
+        "#1a0e10",
+    },
+
+    statusHeader: {
+      flexDirection:
+        "row",
+      alignItems:
+        "flex-start",
+      gap: 9,
+    },
+
+    statusIndicator: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+      marginTop: 5,
+      backgroundColor:
+        "#6b7380",
+    },
+
+    statusIndicatorWorking: {
+      backgroundColor:
+        "#8b7fff",
+    },
+
+    statusIndicatorSuccess: {
+      backgroundColor:
+        "#62c98f",
+    },
+
+    statusIndicatorError: {
+      backgroundColor:
+        "#ef727d",
+    },
+
+    statusText: {
+      flex: 1,
+      color:
+        "#d5d9df",
+      fontSize: 12,
+      fontWeight:
+        "700",
+      lineHeight: 17,
+    },
+
+    statusHint: {
+      color:
+        "#626a77",
+      fontSize: 10,
+      lineHeight: 15,
+      marginTop: 7,
+      marginLeft: 16,
+    },
+
+    outputCard: {
+      backgroundColor:
+        "#11141a",
+      borderWidth: 1,
+      borderColor:
+        "#262d38",
+      borderRadius: 18,
+      padding: 17,
+    },
+
+    outputHeader: {
+      flexDirection:
+        "row",
+      justifyContent:
+        "space-between",
+      alignItems:
+        "center",
+      marginBottom: 14,
+    },
+
+    outputHeading: {
+      color:
+        "#e9ebef",
+      fontWeight:
+        "800",
+      fontSize: 15,
+      marginTop: 4,
+    },
+
+    readyBadge: {
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+      borderRadius: 999,
+      backgroundColor:
+        "#13241b",
+      borderWidth: 1,
+      borderColor:
+        "#28513a",
+    },
+
+    readyText: {
+      color:
+        "#72d39d",
+      fontSize: 9,
+      fontWeight:
+        "900",
+      letterSpacing: 0.8,
     },
 
     output: {
-      minHeight: 300,
-      backgroundColor: "#0d1015",
+      minHeight: 260,
+      backgroundColor:
+        "#0b0e13",
       borderWidth: 1,
-      borderColor: "#292f3a",
-      borderRadius: 12,
-      justifyContent: "center",
-      alignItems: "center",
+      borderColor:
+        "#292f3b",
+      borderRadius: 13,
+      overflow:
+        "hidden",
+    },
+
+    emptyOutput: {
+      minHeight: 260,
+      justifyContent:
+        "center",
+      alignItems:
+        "center",
       padding: 20,
     },
 
+    resultImage: {
+      width:
+        "100%",
+      height: 350,
+      backgroundColor:
+        "#07090c",
+    },
+
+    outputActions: {
+      flexDirection:
+        "row",
+      gap: 9,
+      padding: 11,
+    },
+
+    secondaryButton: {
+      flex: 1,
+      minHeight: 44,
+      borderRadius: 9,
+      backgroundColor:
+        "#25203c",
+      borderWidth: 1,
+      borderColor:
+        "#413872",
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
+    },
+
+    secondaryButtonText: {
+      color:
+        "#e7e3ff",
+      fontWeight:
+        "800",
+      fontSize: 12,
+    },
+
+    ghostButton: {
+      minWidth: 86,
+      minHeight: 44,
+      borderRadius: 9,
+      borderWidth: 1,
+      borderColor:
+        "#303744",
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
+    },
+
+    ghostButtonText: {
+      color:
+        "#a3aab5",
+      fontWeight:
+        "700",
+      fontSize: 12,
+    },
+
+    controlPressed: {
+      opacity: 0.78,
+    },
+
     outputSymbol: {
-      color: "#626b78",
-      fontSize: 34,
-      marginBottom: 12,
+      color:
+        "#565e6b",
+      fontSize: 31,
+      marginBottom: 10,
     },
 
     outputTitle: {
-      color: "#cdd3dc",
-      fontSize: 14,
-      fontWeight: "700",
+      color:
+        "#cdd2da",
+      fontSize: 13,
+      fontWeight:
+        "700",
     },
 
     outputHint: {
-      color: "#737b88",
-      fontSize: 12,
+      color:
+        "#626a78",
+      fontSize: 11,
       marginTop: 5,
+      textAlign:
+        "center",
     },
 
-    safetyNote: {
-      color: "#555d69",
-      fontSize: 11,
-      textAlign: "center",
-      marginTop: 14,
+    footer: {
+      color:
+        "#464d58",
+      fontSize: 9,
+      textAlign:
+        "center",
+      marginTop: 15,
+      letterSpacing: 0.4,
     },
   });
