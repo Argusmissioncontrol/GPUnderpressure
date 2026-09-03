@@ -1,6 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 
 import React, {
+  useEffect,
   useState,
 } from "react";
 
@@ -26,12 +27,22 @@ import {
   ASPECT_RATIOS,
   type AspectRatio,
   type GenerationRequest,
+  type WorkflowDefinition,
+  type WorkflowGenerationRequest,
+  type WorkflowTuning,
 } from "./src/api/types";
 
 import {
   realGenerationClient,
   RemoteApiError,
 } from "./src/api/realClient";
+import {
+  loadWorkflowCatalog,
+  submitWorkflowGeneration,
+} from "./src/api/workflowClient";
+import {
+  WorkflowControls,
+} from "./src/components/WorkflowControls";
 
 
 type RunState =
@@ -52,6 +63,31 @@ const RATIO_LABELS: Record<
   "4:3": "Classic",
   "9:16": "Portrait",
 };
+
+
+function tuningForWorkflow(
+  workflow: WorkflowDefinition
+): WorkflowTuning {
+  return {
+    modelKey: workflow.modelKey,
+    promptMode: workflow.promptModes[0] ?? "normal",
+    batchSize: String(workflow.defaults.batchSize),
+    steps: String(workflow.defaults.steps),
+    cfg: String(workflow.defaults.cfg),
+    sampler: workflow.defaults.sampler,
+    scheduler: workflow.defaults.scheduler ?? "",
+    negativePrompt: workflow.defaults.negativePrompt ?? "",
+    mysticLoraStrength:
+      workflow.defaults.mysticLoraStrength === null
+        ? ""
+        : String(workflow.defaults.mysticLoraStrength),
+    characterLoraStrength:
+      workflow.defaults.characterLoraStrength === null
+        ? ""
+        : String(workflow.defaults.characterLoraStrength),
+  };
+}
+
 
 
 function friendlyGenerationError(
@@ -109,6 +145,17 @@ export default function App() {
   ] = useState("");
 
   const [
+    workflows,
+    setWorkflows,
+  ] = useState<WorkflowDefinition[]>([]);
+
+  const [
+    workflowTuning,
+    setWorkflowTuning,
+  ] = useState<WorkflowTuning | null>(null);
+
+
+  const [
     resultUri,
     setResultUri,
   ] = useState<string | null>(
@@ -136,6 +183,49 @@ export default function App() {
     "Ready. Host-controlled Z-Turbo route."
   );
 
+
+  useEffect(() => {
+    let disposed = false;
+
+    loadWorkflowCatalog()
+      .then((catalog) => {
+        if (disposed) {
+          return;
+        }
+
+        setWorkflows(catalog.workflows);
+
+        const preferred =
+          catalog.workflows.find(
+            (item) => item.modelKey === "z_turbo"
+          ) ?? catalog.workflows[0];
+
+        if (preferred) {
+          setWorkflowTuning(
+            tuningForWorkflow(preferred)
+          );
+          setStatus(
+            `Ready. ${preferred.name}.`
+          );
+        }
+      })
+      .catch((error) => {
+        console.warn(
+          "Workflow discovery unavailable; legacy route remains usable:",
+          error
+        );
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const selectedWorkflow =
+    workflows.find(
+      (item) =>
+        item.modelKey === workflowTuning?.modelKey
+    ) ?? null;
 
   const requestInFlight =
     runState === "submitting" ||
@@ -271,7 +361,8 @@ export default function App() {
       prompt.trim();
 
     if (
-      !cleanPrompt
+      !cleanPrompt &&
+      workflowTuning?.promptMode !== "wildcard"
     ) {
       setRunState(
         "error"
@@ -304,29 +395,82 @@ export default function App() {
       return;
     }
 
-    const request:
-      GenerationRequest = {
-        requestId:
-          `${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2)}`,
+    const requestId =
+      `${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
 
-        generationType:
-          "image",
+    const seedValue =
+      seedMode === "random"
+        ? "-1"
+        : cleanSeed;
 
-        prompt:
-          cleanPrompt,
+    const request: GenerationRequest = {
+      requestId,
+      generationType: "image",
+      prompt: cleanPrompt,
+      aspectRatio,
+      seed: seedValue,
+      referenceUri: null,
+    };
 
+    let workflowRequest:
+      WorkflowGenerationRequest | null = null;
+
+    if (
+      selectedWorkflow &&
+      workflowTuning
+    ) {
+      const batchSize = Number(workflowTuning.batchSize);
+      const steps = Number(workflowTuning.steps);
+      const cfg = Number(workflowTuning.cfg);
+
+      if (
+        !Number.isInteger(batchSize) ||
+        !Number.isInteger(steps) ||
+        !Number.isFinite(cfg)
+      ) {
+        setRunState("error");
+        setStatus(
+          "Batch and Steps must be whole numbers; CFG must be numeric."
+        );
+        return;
+      }
+
+      workflowRequest = {
+        requestId,
+        generationType: "image",
+        modelKey: workflowTuning.modelKey,
+        promptMode: workflowTuning.promptMode,
+        prompt: cleanPrompt,
         aspectRatio,
-
-        seed:
-          seedMode === "random"
-            ? "-1"
-            : cleanSeed,
-
-        referenceUri:
-          null,
+        seed: seedValue,
+        batchSize,
+        steps,
+        cfg,
+        sampler: workflowTuning.sampler.trim(),
+        scheduler:
+          selectedWorkflow.defaults.scheduler === null
+            ? null
+            : workflowTuning.scheduler.trim(),
+        referenceUri: null,
       };
+
+      if (selectedWorkflow.capabilities.negativePrompt) {
+        workflowRequest.negativePrompt =
+          workflowTuning.negativePrompt;
+      }
+
+      if (selectedWorkflow.capabilities.mysticLora) {
+        workflowRequest.mysticLoraStrength =
+          Number(workflowTuning.mysticLoraStrength);
+      }
+
+      if (selectedWorkflow.capabilities.characterLora) {
+        workflowRequest.characterLoraStrength =
+          Number(workflowTuning.characterLoraStrength);
+      }
+    }
 
     console.log(
       "GPUnder Pressure request:",
@@ -342,11 +486,15 @@ export default function App() {
     );
 
     try {
-      const result =
-        await realGenerationClient.submit(
-          request,
-          setProgress
-        );
+      const result = workflowRequest
+        ? await submitWorkflowGeneration(
+            workflowRequest,
+            setProgress
+          )
+        : await realGenerationClient.submit(
+            request,
+            setProgress
+          );
 
       if (
         result.resultUrl
@@ -397,7 +545,7 @@ export default function App() {
             ? "The result returned from Local Gen Studio."
             : runState === "error"
               ? "This is the actual client/API failure."
-              : "Heavy generation controls stay on the host.";
+              : "Workflow controls mirror Local Gen Studio's loaded recipes.";
 
 
   return (
@@ -486,7 +634,7 @@ export default function App() {
                 styles.engineName
               }
             >
-              Z-Turbo
+              {selectedWorkflow?.name ?? "Z-Turbo"}
             </Text>
 
             <Text
@@ -494,7 +642,7 @@ export default function App() {
                 styles.engineMeta
               }
             >
-              Host controlled
+              {workflowTuning ? "Workflow controlled" : "Legacy route"}
             </Text>
           </View>
         </View>
@@ -526,7 +674,7 @@ export default function App() {
               styles.cardIntro
             }
           >
-            Prompt here. The expensive knobs stay safely on Local Gen Studio.
+            Choose the real LGS workflow, tune it, and send it to the home GPU.
           </Text>
 
 
@@ -552,6 +700,22 @@ export default function App() {
             placeholderTextColor="#626a78"
             multiline
             textAlignVertical="top"
+          />
+
+          <WorkflowControls
+            workflows={workflows}
+            workflow={selectedWorkflow}
+            value={workflowTuning}
+            disabled={requestInFlight}
+            onSelectWorkflow={(workflow) => {
+              setWorkflowTuning(
+                tuningForWorkflow(workflow)
+              );
+              setStatus(
+                `Ready. ${workflow.name}.`
+              );
+            }}
+            onChange={setWorkflowTuning}
           />
 
 
