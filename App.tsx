@@ -43,6 +43,14 @@ import {
 import {
   WorkflowControls,
 } from "./src/components/WorkflowControls";
+import {
+  MobileEditPanel,
+} from "./src/components/MobileEditPanel";
+import {
+  AnimaTagCompendium,
+} from "./src/components/AnimaTagCompendium";
+
+// LGS_MOBILE_STUDIO_V3
 
 
 type RunState =
@@ -126,6 +134,16 @@ export default function App() {
     prompt,
     setPrompt,
   ] = useState("");
+
+  const [
+    mobileMode,
+    setMobileMode,
+  ] = useState<"generate" | "edit">("generate");
+
+  const [
+    editRouteName,
+    setEditRouteName,
+  ] = useState("Klein 9B â€” Reference Edit");
 
   const [
     aspectRatio,
@@ -634,7 +652,9 @@ export default function App() {
                 styles.engineName
               }
             >
-              {selectedWorkflow?.name ?? "Z-Turbo"}
+              {mobileMode === "edit"
+                ? editRouteName
+                : selectedWorkflow?.name ?? "Z-Turbo"}
             </Text>
 
             <Text
@@ -642,16 +662,67 @@ export default function App() {
                 styles.engineMeta
               }
             >
-              {workflowTuning ? "Workflow controlled" : "Legacy route"}
+              {mobileMode === "edit"
+                ? "Reference edit"
+                : workflowTuning
+                  ? "Workflow controlled"
+                  : "Legacy route"}
             </Text>
           </View>
         </View>
 
 
         <View
-          style={
-            styles.card
-          }
+          style={{
+            flexDirection: "row",
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
+          {(["generate", "edit"] as const).map((mode) => {
+            const active = mobileMode === mode;
+            return (
+              <Pressable
+                key={mode}
+                disabled={requestInFlight}
+                onPress={() => {
+                  setMobileMode(mode);
+                  setRunState("idle");
+                  setStatus(
+                    mode === "edit"
+                      ? `Ready. ${editRouteName}.`
+                      : `Ready. ${selectedWorkflow?.name ?? "Generate"}.`
+                  );
+                }}
+                style={{
+                  flex: 1,
+                  minHeight: 44,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: active ? "#756be0" : "#2a3240",
+                  backgroundColor: active ? "#24204c" : "#11161d",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? "#f1efff" : "#9fa7b3",
+                    fontWeight: "900",
+                  }}
+                >
+                  {mode === "generate" ? "Generate" : "Edit"}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View
+          style={[
+            styles.card,
+            mobileMode === "edit" && { display: "none" },
+          ]}
         >
           <Text
             style={
@@ -717,6 +788,14 @@ export default function App() {
             }}
             onChange={setWorkflowTuning}
           />
+
+          {selectedWorkflow?.modelKey === "anima_turbo" && (
+            <AnimaTagCompendium
+              prompt={prompt}
+              disabled={requestInFlight}
+              onChangePrompt={setPrompt}
+            />
+          )}
 
 
           <Text
@@ -968,6 +1047,20 @@ export default function App() {
           </View>
         </View>
 
+
+        <MobileEditPanel
+          visible={mobileMode === "edit"}
+          disabled={requestInFlight}
+          runState={runState}
+          status={status}
+          onRunState={setRunState}
+          onStatus={setStatus}
+          onRouteName={setEditRouteName}
+          onResult={(uri) => {
+            setResultUri(uri);
+            setSaveState("idle");
+          }}
+        />
 
         <View
           style={

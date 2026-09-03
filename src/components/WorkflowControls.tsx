@@ -1,4 +1,4 @@
-﻿import React from "react";
+﻿import React, { useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -12,6 +12,18 @@ import type {
   WorkflowTuning,
 } from "../api/types";
 
+const SAMPLER_OPTIONS = [
+  "res_multistep",
+  "euler",
+  "euler_ancestral",
+  "sa_solver",
+] as const;
+
+const SCHEDULER_OPTIONS = [
+  "simple",
+  "beta",
+  "sgm_uniform",
+] as const;
 
 type Props = {
   workflows: WorkflowDefinition[];
@@ -22,6 +34,9 @@ type Props = {
   onChange: (next: WorkflowTuning) => void;
 };
 
+function uniqueOptions(current: string, options: readonly string[]) {
+  return Array.from(new Set([current, ...options].filter(Boolean)));
+}
 
 export function WorkflowControls({
   workflows,
@@ -41,20 +56,13 @@ export function WorkflowControls({
     );
   }
 
-  const patch = (
-    update: Partial<WorkflowTuning>
-  ) => {
-    onChange({
-      ...value,
-      ...update,
-    });
+  const patch = (update: Partial<WorkflowTuning>) => {
+    onChange({ ...value, ...update });
   };
 
   return (
     <View style={styles.panel}>
-      <Text style={styles.eyebrow}>
-        WORKFLOW
-      </Text>
+      <Text style={styles.eyebrow}>WORKFLOW</Text>
 
       <View style={styles.wrapRow}>
         {workflows.map((item) => {
@@ -64,17 +72,9 @@ export function WorkflowControls({
               key={item.modelKey}
               disabled={disabled}
               onPress={() => onSelectWorkflow(item)}
-              style={[
-                styles.choice,
-                active && styles.choiceActive,
-              ]}
+              style={[styles.choice, active && styles.choiceActive]}
             >
-              <Text
-                style={[
-                  styles.choiceText,
-                  active && styles.choiceTextActive,
-                ]}
-              >
+              <Text style={[styles.choiceText, active && styles.choiceTextActive]}>
                 {item.name}
               </Text>
             </Pressable>
@@ -82,9 +82,7 @@ export function WorkflowControls({
         })}
       </View>
 
-      <Text style={styles.description}>
-        {workflow.description}
-      </Text>
+      <Text style={styles.description}>{workflow.description}</Text>
 
       {workflow.promptModes.length > 1 && (
         <>
@@ -97,17 +95,9 @@ export function WorkflowControls({
                   key={mode}
                   disabled={disabled}
                   onPress={() => patch({ promptMode: mode })}
-                  style={[
-                    styles.choice,
-                    active && styles.choiceActive,
-                  ]}
+                  style={[styles.choice, active && styles.choiceActive]}
                 >
-                  <Text
-                    style={[
-                      styles.choiceText,
-                      active && styles.choiceTextActive,
-                    ]}
-                  >
+                  <Text style={[styles.choiceText, active && styles.choiceTextActive]}>
                     {mode === "wildcard" ? "Wildcard" : "Normal"}
                   </Text>
                 </Pressable>
@@ -139,23 +129,30 @@ export function WorkflowControls({
           keyboardType="decimal-pad"
           disabled={disabled}
         />
-        <Field
-          label="Sampler"
-          value={value.sampler}
-          onChangeText={(text) => patch({ sampler: text })}
+      </View>
+
+      <ChoiceSelector
+        label="Sampler"
+        value={value.sampler}
+        options={uniqueOptions(value.sampler, SAMPLER_OPTIONS)}
+        disabled={disabled}
+        onSelect={(next) => patch({ sampler: next })}
+      />
+
+      {workflow.defaults.scheduler !== null && (
+        <ChoiceSelector
+          label="Scheduler"
+          value={value.scheduler}
+          options={uniqueOptions(value.scheduler, SCHEDULER_OPTIONS)}
           disabled={disabled}
+          onSelect={(next) => patch({ scheduler: next })}
         />
-        {workflow.defaults.scheduler !== null && (
-          <Field
-            label="Scheduler"
-            value={value.scheduler}
-            onChangeText={(text) => patch({ scheduler: text })}
-            disabled={disabled}
-          />
-        )}
+      )}
+
+      <View style={styles.grid}>
         {workflow.capabilities.characterLora && (
           <Field
-            label="Character LoRA"
+            label="LoRA Strength"
             value={value.characterLoraStrength}
             onChangeText={(text) => patch({ characterLoraStrength: text })}
             keyboardType="decimal-pad"
@@ -191,6 +188,60 @@ export function WorkflowControls({
   );
 }
 
+type ChoiceSelectorProps = {
+  label: string;
+  value: string;
+  options: string[];
+  disabled: boolean;
+  onSelect: (value: string) => void;
+};
+
+function ChoiceSelector({
+  label,
+  value,
+  options,
+  disabled,
+  onSelect,
+}: ChoiceSelectorProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <View style={styles.dropdownWrap}>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable
+        disabled={disabled}
+        onPress={() => setOpen((current) => !current)}
+        style={[styles.dropdownButton, open && styles.dropdownButtonOpen]}
+      >
+        <Text style={styles.dropdownValue}>{value}</Text>
+        <Text style={styles.dropdownArrow}>{open ? "â–²" : "â–¼"}</Text>
+      </Pressable>
+
+      {open && (
+        <View style={styles.dropdownMenu}>
+          {options.map((option) => {
+            const active = option === value;
+            return (
+              <Pressable
+                key={option}
+                disabled={disabled}
+                onPress={() => {
+                  onSelect(option);
+                  setOpen(false);
+                }}
+                style={[styles.dropdownOption, active && styles.dropdownOptionActive]}
+              >
+                <Text style={[styles.choiceText, active && styles.choiceTextActive]}>
+                  {option}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
 
 type FieldProps = {
   label: string;
@@ -199,7 +250,6 @@ type FieldProps = {
   keyboardType?: "default" | "number-pad" | "decimal-pad";
   disabled?: boolean;
 };
-
 
 function Field({
   label,
@@ -225,8 +275,52 @@ function Field({
   );
 }
 
-
 const styles = StyleSheet.create({
+  dropdownWrap: {
+    marginTop: 4,
+    minWidth: 150,
+    flexGrow: 1,
+  },
+  dropdownButton: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: "#2a3240",
+    backgroundColor: "#0a0d12",
+    borderRadius: 9,
+    paddingHorizontal: 11,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dropdownButtonOpen: {
+    borderColor: "#756be0",
+  },
+  dropdownValue: {
+    color: "#f4f5f8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  dropdownArrow: {
+    color: "#8d86e8",
+    fontSize: 10,
+  },
+  dropdownMenu: {
+    marginTop: 5,
+    borderWidth: 1,
+    borderColor: "#2a3240",
+    backgroundColor: "#0a0d12",
+    borderRadius: 9,
+    overflow: "hidden",
+  },
+  dropdownOption: {
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1c222c",
+  },
+  dropdownOptionActive: {
+    backgroundColor: "#24204c",
+  },
   panel: {
     borderWidth: 1,
     borderColor: "#242b37",
@@ -242,10 +336,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     marginBottom: 8,
   },
-  muted: {
-    color: "#737c8b",
-    fontSize: 12,
-  },
+  muted: { color: "#737c8b", fontSize: 12 },
   description: {
     color: "#777f8d",
     fontSize: 11,
@@ -275,9 +366,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
-  choiceTextActive: {
-    color: "#f1efff",
-  },
+  choiceTextActive: { color: "#f1efff" },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -294,7 +383,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
     marginBottom: 5,
-    marginTop: 8,
+    marginTop: 10,
   },
   input: {
     minHeight: 40,
