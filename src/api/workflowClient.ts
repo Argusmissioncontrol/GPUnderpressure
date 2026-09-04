@@ -1,4 +1,4 @@
-﻿import type { GenerationProgressCallback } from "./client";
+import type { GenerationProgressCallback } from "./client";
 import { RemoteApiError } from "./realClient";
 import { absoluteLgsUrl, fetchLgs } from "./lgsNetwork";
 import type {
@@ -87,15 +87,27 @@ export async function submitWorkflowGeneration(
       throw new RemoteApiError("Local Gen Studio returned an invalid job-status response.");
     }
 
-    const jobData = job as { status: unknown; resultUrl?: unknown };
+    const jobData = job as { status: unknown; resultUrl?: unknown; resultUrls?: unknown };
     const status = String(jobData.status).toUpperCase();
     mapHostStatus(status, onStatus);
 
     if (status === "COMPLETED") {
-      const resultPath = typeof jobData.resultUrl === "string"
-        ? jobData.resultUrl
-        : `/api/v1/jobs/${jobId}/result`;
-      return { jobId, status: "finished", resultUrl: absoluteLgsUrl(resultPath, statusCall.baseUrl) };
+      const resultPath =
+        typeof jobData.resultUrl === "string"
+          ? jobData.resultUrl
+          : `/api/v1/jobs/${jobId}/result`;
+      const resultPaths = Array.isArray(jobData.resultUrls)
+        ? jobData.resultUrls.filter((value: unknown): value is string => typeof value === "string")
+        : [];
+      const resultUrls = (resultPaths.length ? resultPaths : [resultPath]).map(
+        (value: string) => absoluteLgsUrl(value, statusCall.baseUrl)
+      );
+      return {
+        jobId,
+        status: "finished",
+        resultUrl: resultUrls[0],
+        resultUrls,
+      };
     }
     if (status === "FAILED" || status === "CANCELED" || status === "CANCELLED") {
       throw new RemoteApiError(`Host generation ended with status ${status}.`);

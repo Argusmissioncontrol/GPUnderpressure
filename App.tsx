@@ -47,6 +47,9 @@ import {
   MobileEditPanel,
 } from "./src/components/MobileEditPanel";
 import {
+  MobileResultGallery,
+} from "./src/components/MobileResultGallery";
+import {
   PromptEnhancer,
 } from "./src/components/PromptEnhancer";
 
@@ -181,6 +184,8 @@ export default function App() {
   ] = useState<string | null>(
     null
   );
+
+  const [resultUris, setResultUris] = useState<string[]>([]);
 
   const [
     saveState,
@@ -516,16 +521,15 @@ export default function App() {
             setProgress
           );
 
-      if (
-        result.resultUrl
-      ) {
-        setResultUri(
-          result.resultUrl
-        );
-
-        setSaveState(
-          "idle"
-        );
+      const generatedUris = result.resultUrls?.length
+        ? result.resultUrls
+        : result.resultUrl
+          ? [result.resultUrl]
+          : [];
+      if (generatedUris.length) {
+        setResultUris(generatedUris);
+        setResultUri(generatedUris[0]);
+        setSaveState("idle");
       }
 
       setRunState(
@@ -1059,16 +1063,25 @@ export default function App() {
           onRunState={setRunState}
           onStatus={setStatus}
           onRouteName={setEditRouteName}
-          onResult={(uri) => {
-            setResultUri(uri);
+          onResult={(uris) => {
+            setResultUris(uris);
+            setResultUri(uris[0] ?? null);
+            setSaveState("idle");
+          }}
+        />
+
+        {/* LGS_MOBILE_BATCH_GALLERY_V6 */}
+        <MobileResultGallery
+          uris={resultUris}
+          onClear={() => {
+            setResultUris([]);
+            setResultUri("");
             setSaveState("idle");
           }}
         />
 
         <View
-          style={
-            styles.outputCard
-          }
+          style={[styles.outputCard, { display: "none" }]}
         >
           <View
             style={
@@ -1232,7 +1245,7 @@ export default function App() {
             styles.footer
           }
         >
-          Tailscale â†’ Local Gen Studio â†’ ComfyUI â†’ RTX 3060
+          Tailscale → Local Gen Studio → ComfyUI → RTX 3060
         </Text>
       </ScrollView>
     </SafeAreaView>

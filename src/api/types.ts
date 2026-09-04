@@ -1,4 +1,4 @@
-﻿export type GenerationMode =
+export type GenerationMode =
   | "image"
   | "reference";
 
@@ -35,6 +35,7 @@ export type GenerationJob = {
   queuePosition?: number;
   progress?: number;
   resultUrl?: string;
+  resultUrls?: string[];
   error?: string;
 };
 

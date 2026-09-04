@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useMemo,
   useState,
@@ -42,7 +42,7 @@ type Props = {
   onRunState: (state: RunState) => void;
   onStatus: (status: string) => void;
   onRouteName: (name: string) => void;
-  onResult: (uri: string) => void;
+  onResult: (uris: string[]) => void;
 };
 
 
@@ -236,8 +236,13 @@ export function MobileEditPanel({
         }
       );
 
-      if (result.resultUrl) {
-        onResult(result.resultUrl);
+      const resultUris = result.resultUrls?.length
+        ? result.resultUrls
+        : result.resultUrl
+          ? [result.resultUrl]
+          : [];
+      if (resultUris.length) {
+        onResult(resultUris);
       }
       onRunState("success");
       onStatus("Klein edit complete.");

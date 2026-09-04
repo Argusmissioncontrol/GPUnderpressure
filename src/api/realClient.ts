@@ -221,6 +221,7 @@ export const realGenerationClient: GenerationClient = {
         job as {
           status: unknown;
           resultUrl?: unknown;
+      resultUrls?: unknown;
         };
 
       const status =
@@ -235,17 +236,21 @@ export const realGenerationClient: GenerationClient = {
 
       if (status === "COMPLETED") {
         const resultPath =
-          typeof jobData.resultUrl ===
-          "string"
-            ? jobData.resultUrl
-            : `/api/v1/jobs/${jobId}/result`;
-
-        return {
-          jobId,
-          status: "finished",
-          resultUrl:
-            `${BASE_URL}${resultPath}`,
-        };
+        typeof jobData.resultUrl === "string"
+          ? jobData.resultUrl
+          : `/api/v1/jobs/${jobId}/result`;
+      const resultPaths = Array.isArray(jobData.resultUrls)
+        ? jobData.resultUrls.filter((value): value is string => typeof value === "string")
+        : [];
+      const resultUrls = (resultPaths.length ? resultPaths : [resultPath]).map(
+        (value) => `${BASE_URL}${value}`
+      );
+      return {
+        jobId,
+        status: "finished",
+        resultUrl: resultUrls[0],
+        resultUrls,
+      };
       }
 
       if (
