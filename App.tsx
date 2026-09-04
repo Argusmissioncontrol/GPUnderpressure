@@ -1,4 +1,4 @@
-import { StatusBar } from "expo-status-bar";
+﻿import { StatusBar } from "expo-status-bar";
 
 import React, {
   useEffect,
@@ -47,8 +47,10 @@ import {
   MobileEditPanel,
 } from "./src/components/MobileEditPanel";
 import {
-  AnimaTagCompendium,
-} from "./src/components/AnimaTagCompendium";
+  PromptEnhancer,
+} from "./src/components/PromptEnhancer";
+
+// LGS_MOBILE_PROMPT_ENHANCER_V5
 
 // LGS_MOBILE_STUDIO_V3
 
@@ -143,7 +145,7 @@ export default function App() {
   const [
     editRouteName,
     setEditRouteName,
-  ] = useState("Klein 9B â€” Reference Edit");
+  ] = useState("Klein 9B Ã¢â‚¬â€ Reference Edit");
 
   const [
     aspectRatio,
@@ -789,8 +791,9 @@ export default function App() {
             onChange={setWorkflowTuning}
           />
 
-          {selectedWorkflow?.modelKey === "anima_turbo" && (
-            <AnimaTagCompendium
+          {selectedWorkflow && (
+            <PromptEnhancer
+              modelKey={selectedWorkflow.modelKey}
               prompt={prompt}
               disabled={requestInFlight}
               onChangePrompt={setPrompt}
@@ -1200,7 +1203,7 @@ export default function App() {
                     styles.outputSymbol
                   }
                 >
-                  ◇
+                  â—‡
                 </Text>
 
                 <Text
@@ -1229,7 +1232,7 @@ export default function App() {
             styles.footer
           }
         >
-          Tailscale → Local Gen Studio → ComfyUI → RTX 3060
+          Tailscale â†’ Local Gen Studio â†’ ComfyUI â†’ RTX 3060
         </Text>
       </ScrollView>
     </SafeAreaView>
