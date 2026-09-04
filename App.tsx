@@ -1,4 +1,4 @@
-﻿import { StatusBar } from "expo-status-bar";
+import { StatusBar } from "expo-status-bar";
 
 import React, {
   useEffect,
@@ -145,7 +145,7 @@ export default function App() {
   const [
     editRouteName,
     setEditRouteName,
-  ] = useState("Klein 9B Ã¢â‚¬â€ Reference Edit");
+  ] = useState("Klein 9B - Reference Edit");
 
   const [
     aspectRatio,
