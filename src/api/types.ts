@@ -54,11 +54,17 @@ export type WorkflowDefinition = {
     negativePrompt: string | null;
     mysticLoraStrength: number | null;
     characterLoraStrength: number | null;
+    secondaryCharacterLoraStrength?: number | null;
   };
   capabilities: {
     negativePrompt: boolean;
     mysticLora: boolean;
     characterLora: boolean;
+    secondaryCharacterLora?: boolean;
+  };
+  labels?: {
+    characterLora: string | null;
+    secondaryCharacterLora: string | null;
   };
   limits: {
     batchSize: { min: number; max: number };
@@ -84,6 +90,7 @@ export type WorkflowTuning = {
   negativePrompt: string;
   mysticLoraStrength: string;
   characterLoraStrength: string;
+  secondaryCharacterLoraStrength: string;
 };
 
 export type WorkflowGenerationRequest = {
@@ -102,5 +109,6 @@ export type WorkflowGenerationRequest = {
   negativePrompt?: string;
   mysticLoraStrength?: number;
   characterLoraStrength?: number;
+  secondaryCharacterLoraStrength?: number;
   referenceUri: null;
 };

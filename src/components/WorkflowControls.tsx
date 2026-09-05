@@ -1,4 +1,4 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -152,9 +152,25 @@ export function WorkflowControls({
       <View style={styles.grid}>
         {workflow.capabilities.characterLora && (
           <Field
-            label="LoRA Strength"
+            label={workflow.labels?.characterLora ?? "LoRA Strength"}
             value={value.characterLoraStrength}
             onChangeText={(text) => patch({ characterLoraStrength: text })}
+            keyboardType="decimal-pad"
+            disabled={disabled}
+          />
+        )}
+        {workflow.capabilities.secondaryCharacterLora && (
+          <Field
+            label={
+              workflow.labels?.secondaryCharacterLora ??
+              "LoRA Strength B"
+            }
+            value={value.secondaryCharacterLoraStrength}
+            onChangeText={(next) =>
+              patch({
+                secondaryCharacterLoraStrength: next,
+              })
+            }
             keyboardType="decimal-pad"
             disabled={disabled}
           />

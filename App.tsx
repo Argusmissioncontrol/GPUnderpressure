@@ -98,6 +98,12 @@ function tuningForWorkflow(
       workflow.defaults.characterLoraStrength === null
         ? ""
         : String(workflow.defaults.characterLoraStrength),
+    secondaryCharacterLoraStrength:
+      workflow.defaults.secondaryCharacterLoraStrength == null
+        ? ""
+        : String(
+            workflow.defaults.secondaryCharacterLoraStrength
+          ),
   };
 }
 
@@ -251,6 +257,9 @@ export default function App() {
       (item) =>
         item.modelKey === workflowTuning?.modelKey
     ) ?? null;
+
+  const wildcardMode =
+    workflowTuning?.promptMode === "wildcard";
 
   const requestInFlight =
     runState === "submitting" ||
@@ -763,6 +772,8 @@ export default function App() {
             Prompt
           </Text>
 
+          {!wildcardMode && (
+            <>
           <TextInput
             style={
               styles.promptInput
@@ -778,6 +789,8 @@ export default function App() {
             multiline
             textAlignVertical="top"
           />
+            </>
+          )}
 
           <WorkflowControls
             workflows={workflows}
@@ -795,7 +808,7 @@ export default function App() {
             onChange={setWorkflowTuning}
           />
 
-          {selectedWorkflow && (
+          {selectedWorkflow && !wildcardMode && (
             <PromptEnhancer
               modelKey={selectedWorkflow.modelKey}
               prompt={prompt}
