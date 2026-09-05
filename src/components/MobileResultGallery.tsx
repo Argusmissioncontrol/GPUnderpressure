@@ -26,18 +26,36 @@ export function MobileResultGallery({ uris, onClear }: Props) {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    setIndex(0);
+    const nextIndex =
+      Math.max(
+        0,
+        uris.length - 1
+      );
+
+    setIndex(
+      nextIndex
+    );
+
     setMessage("");
+
     if (uris.length) {
-      setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }), 0);
+      setTimeout(
+        () =>
+          listRef.current?.scrollToOffset({
+            offset:
+              nextIndex * WIDTH,
+            animated:
+              false,
+          }),
+        0
+      );
     }
   }, [uris]);
-
   if (!uris.length) {
     return (
       <View style={styles.card}>
         <Text style={styles.eyebrow}>LATEST OUTPUT</Text>
-        <Text style={styles.empty}>No result yet. Batch generations will appear here as a swipeable gallery.</Text>
+        <Text style={styles.empty}>No result yet. Batch and queued generations will appear here as a swipeable gallery.</Text>
       </View>
     );
   }
@@ -85,7 +103,7 @@ export function MobileResultGallery({ uris, onClear }: Props) {
           </View>
         )}
       />
-      <Text style={styles.hint}>{uris.length > 1 ? "Swipe left or right through the batch." : "Single result."}</Text>
+      <Text style={styles.hint}>{uris.length > 1 ? "Swipe left or right through the results." : "Single result."}</Text>
       <View style={styles.actions}>
         <Action label="SAVE THIS" disabled={saving} onPress={() => saveUris([uris[index]])} />
         {uris.length > 1 && <Action label="SAVE ALL" disabled={saving} onPress={() => saveUris(uris)} />}
@@ -108,7 +126,7 @@ const styles = StyleSheet.create({
   eyebrow: { color: "#756be0", fontSize: 9, fontWeight: "900", letterSpacing: 1.2 },
   counter: { color: "#9fa7b3", fontSize: 10, fontWeight: "800" },
   empty: { color: "#737c8b", fontSize: 12, lineHeight: 18 },
-  image: { width: "100%", height: 430, backgroundColor: "#080b0f", borderRadius: 10 },
+  image: { width: "100%", height: 500, backgroundColor: "#080b0f", borderRadius: 10 },
   hint: { color: "#737c8b", fontSize: 10, marginTop: 8 },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 10 },
   action: { minHeight: 40, borderWidth: 1, borderColor: "#4a457e", backgroundColor: "#17152c", borderRadius: 9, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },

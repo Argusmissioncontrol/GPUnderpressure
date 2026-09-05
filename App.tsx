@@ -174,6 +174,11 @@ export default function App() {
   ] = useState("");
 
   const [
+    queueCount,
+    setQueueCount,
+  ] = useState(1);
+
+  const [
     workflows,
     setWorkflows,
   ] = useState<WorkflowDefinition[]>([]);
@@ -267,40 +272,6 @@ export default function App() {
     runState === "running";
 
 
-  function setProgress(
-    phase:
-      | "submitting"
-      | "queued"
-      | "running"
-  ) {
-    setRunState(
-      phase
-    );
-
-    if (
-      phase === "submitting"
-    ) {
-      setStatus(
-        "Contacting Local Gen Studio..."
-      );
-      return;
-    }
-
-    if (
-      phase === "queued"
-    ) {
-      setStatus(
-        "Accepted by LGS. Waiting for the host queue."
-      );
-      return;
-    }
-
-    setStatus(
-      "Generation is running on the home GPU."
-    );
-  }
-
-
   async function saveResultImage() {
     if (
       !resultUri ||
@@ -385,9 +356,7 @@ export default function App() {
 
 
   async function handleGenerate() {
-    if (
-      requestInFlight
-    ) {
+    if (requestInFlight) {
       return;
     }
 
@@ -396,16 +365,12 @@ export default function App() {
 
     if (
       !cleanPrompt &&
-      workflowTuning?.promptMode !== "wildcard"
+      !wildcardMode
     ) {
-      setRunState(
-        "error"
-      );
-
+      setRunState("error");
       setStatus(
         "Enter a prompt first."
       );
-
       return;
     }
 
@@ -414,55 +379,48 @@ export default function App() {
 
     if (
       seedMode === "fixed" &&
-      !/^\d+$/.test(
-        cleanSeed
-      )
+      !/^\d+$/.test(cleanSeed)
     ) {
-      setRunState(
-        "error"
-      );
-
+      setRunState("error");
       setStatus(
         "Fixed seed must be a non-negative whole number."
       );
-
       return;
     }
 
-    const requestId =
-      `${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}`;
-
-    const seedValue =
-      seedMode === "random"
-        ? "-1"
-        : cleanSeed;
-
-    const request: GenerationRequest = {
-      requestId,
-      generationType: "image",
-      prompt: cleanPrompt,
-      aspectRatio,
-      seed: seedValue,
-      referenceUri: null,
-    };
-
-    let workflowRequest:
-      WorkflowGenerationRequest | null = null;
+    let batchSize = 1;
+    let steps = 0;
+    let cfg = 0;
 
     if (
       selectedWorkflow &&
       workflowTuning
     ) {
-      const batchSize = Number(workflowTuning.batchSize);
-      const steps = Number(workflowTuning.steps);
-      const cfg = Number(workflowTuning.cfg);
+      batchSize =
+        Number(
+          workflowTuning.batchSize
+        );
+
+      steps =
+        Number(
+          workflowTuning.steps
+        );
+
+      cfg =
+        Number(
+          workflowTuning.cfg
+        );
 
       if (
-        !Number.isInteger(batchSize) ||
-        !Number.isInteger(steps) ||
-        !Number.isFinite(cfg)
+        !Number.isInteger(
+          batchSize
+        ) ||
+        !Number.isInteger(
+          steps
+        ) ||
+        !Number.isFinite(
+          cfg
+        )
       ) {
         setRunState("error");
         setStatus(
@@ -470,93 +428,216 @@ export default function App() {
         );
         return;
       }
-
-      workflowRequest = {
-        requestId,
-        generationType: "image",
-        modelKey: workflowTuning.modelKey,
-        promptMode: workflowTuning.promptMode,
-        prompt: cleanPrompt,
-        aspectRatio,
-        seed: seedValue,
-        batchSize,
-        steps,
-        cfg,
-        sampler: workflowTuning.sampler.trim(),
-        scheduler:
-          selectedWorkflow.defaults.scheduler === null
-            ? null
-            : workflowTuning.scheduler.trim(),
-        referenceUri: null,
-      };
-
-      if (selectedWorkflow.capabilities.negativePrompt) {
-        workflowRequest.negativePrompt =
-          workflowTuning.negativePrompt;
-      }
-
-      if (selectedWorkflow.capabilities.mysticLora) {
-        workflowRequest.mysticLoraStrength =
-          Number(workflowTuning.mysticLoraStrength);
-      }
-
-      if (selectedWorkflow.capabilities.characterLora) {
-        workflowRequest.characterLoraStrength =
-          Number(workflowTuning.characterLoraStrength);
-      }
     }
 
-    console.log(
-      "GPUnder Pressure request:",
-      request
-    );
+    if (
+      queueCount > 1 &&
+      batchSize > 1
+    ) {
+      setRunState("error");
+      setStatus(
+        "Queue above 1 requires Batch = 1. Use Batch or Queue, not both."
+      );
+      return;
+    }
 
-    setRunState(
-      "submitting"
-    );
+    const seedValue =
+      seedMode === "random"
+        ? "-1"
+        : cleanSeed;
 
-    setStatus(
-      "Contacting Local Gen Studio..."
-    );
+    const collectedUris:
+      string[] = [];
+
+    setResultUris([]);
+    setResultUri(null);
+    setSaveState("idle");
 
     try {
-      const result = workflowRequest
-        ? await submitWorkflowGeneration(
-            workflowRequest,
-            setProgress
-          )
-        : await realGenerationClient.submit(
-            request,
-            setProgress
-          );
+      for (
+        let queueIndex = 0;
+        queueIndex < queueCount;
+        queueIndex += 1
+      ) {
+        const position =
+          queueIndex + 1;
 
-      const generatedUris = result.resultUrls?.length
-        ? result.resultUrls
-        : result.resultUrl
-          ? [result.resultUrl]
-          : [];
-      if (generatedUris.length) {
-        setResultUris(generatedUris);
-        setResultUri(generatedUris[0]);
+        const prefix =
+          queueCount > 1
+            ? `Queue ${position}/${queueCount}: `
+            : "";
+
+        const requestId =
+          `${Date.now()}-${queueIndex}-${Math.random()
+            .toString(36)
+            .slice(2)}`;
+
+        const request:
+          GenerationRequest = {
+            requestId,
+            generationType:
+              "image",
+            prompt:
+              cleanPrompt,
+            aspectRatio,
+            seed:
+              seedValue,
+            referenceUri:
+              null,
+          };
+
+        let workflowRequest:
+          WorkflowGenerationRequest |
+          null = null;
+
+        if (
+          selectedWorkflow &&
+          workflowTuning
+        ) {
+          workflowRequest = {
+            requestId,
+            generationType:
+              "image",
+            modelKey:
+              workflowTuning.modelKey,
+            promptMode:
+              workflowTuning.promptMode,
+            prompt:
+              cleanPrompt,
+            aspectRatio,
+            seed:
+              seedValue,
+            batchSize,
+            steps,
+            cfg,
+            sampler:
+              workflowTuning.sampler.trim(),
+            scheduler:
+              selectedWorkflow.defaults.scheduler === null
+                ? null
+                : workflowTuning.scheduler.trim(),
+            referenceUri:
+              null,
+          };
+
+          if (
+            selectedWorkflow.capabilities.negativePrompt
+          ) {
+            workflowRequest.negativePrompt =
+              workflowTuning.negativePrompt;
+          }
+
+          if (
+            selectedWorkflow.capabilities.mysticLora
+          ) {
+            workflowRequest.mysticLoraStrength =
+              Number(
+                workflowTuning.mysticLoraStrength
+              );
+          }
+
+          if (
+            selectedWorkflow.capabilities.characterLora
+          ) {
+            workflowRequest.characterLoraStrength =
+              Number(
+                workflowTuning.characterLoraStrength
+              );
+          }
+
+          if (
+            selectedWorkflow.capabilities.secondaryCharacterLora
+          ) {
+            workflowRequest.secondaryCharacterLoraStrength =
+              Number(
+                workflowTuning.secondaryCharacterLoraStrength
+              );
+          }
+        }
+
+        const progress = (
+          phase:
+            | "submitting"
+            | "queued"
+            | "running"
+        ) => {
+          setRunState(phase);
+
+          if (phase === "submitting") {
+            setStatus(
+              prefix +
+                "Contacting Local Gen Studio..."
+            );
+          }
+          else if (phase === "queued") {
+            setStatus(
+              prefix +
+                "Accepted by LGS. Waiting for the host queue."
+            );
+          }
+          else {
+            setStatus(
+              prefix +
+                "Generation is running on the home GPU."
+            );
+          }
+        };
+
+        const result =
+          workflowRequest
+            ? await submitWorkflowGeneration(
+                workflowRequest,
+                progress
+              )
+            : await realGenerationClient.submit(
+                request,
+                progress
+              );
+
+        const generatedUris =
+          result.resultUrls?.length
+            ? result.resultUrls
+            : result.resultUrl
+              ? [result.resultUrl]
+              : [];
+
+        collectedUris.push(
+          ...generatedUris
+        );
+
+        const visibleUris =
+          queueCount > 1
+            ? collectedUris.slice(-8)
+            : [...collectedUris];
+
+        setResultUris(
+          visibleUris
+        );
+
+        setResultUri(
+          visibleUris[
+            visibleUris.length - 1
+          ] ?? null
+        );
+
         setSaveState("idle");
       }
 
-      setRunState(
-        "success"
-      );
+      setRunState("success");
 
       setStatus(
-        "Generation complete."
+        queueCount > 1
+          ? `Queue complete: ${queueCount} jobs finished.`
+          : "Generation complete."
       );
-    } catch (error) {
+    }
+    catch (error) {
       console.error(
         "GPUnder Pressure generation failed:",
         error
       );
 
-      setRunState(
-        "error"
-      );
+      setRunState("error");
 
       setStatus(
         friendlyGenerationError(
@@ -565,7 +646,6 @@ export default function App() {
       );
     }
   }
-
 
   const statusHint =
     runState === "submitting"
@@ -963,6 +1043,128 @@ export default function App() {
             />
           )}
 
+
+          <Text
+            style={
+              styles.label
+            }
+          >
+            Queue count
+          </Text>
+
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 18,
+            }}
+          >
+            <Pressable
+              disabled={
+                requestInFlight ||
+                queueCount <= 1
+              }
+              onPress={() =>
+                setQueueCount(
+                  (current) =>
+                    Math.max(
+                      1,
+                      current - 1
+                    )
+                )
+              }
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: "#353d4b",
+                backgroundColor: "#151920",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  color: "#ffffff",
+                  fontSize: 22,
+                }}
+              >
+                -
+              </Text>
+            </Pressable>
+
+            <View
+              style={{
+                minWidth: 72,
+                height: 44,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: "#756be0",
+                backgroundColor: "#211d35",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  color: "#f1efff",
+                  fontSize: 16,
+                  fontWeight: "900",
+                }}
+              >
+                {queueCount}
+              </Text>
+            </View>
+
+            <Pressable
+              disabled={
+                requestInFlight ||
+                queueCount >= 8
+              }
+              onPress={() =>
+                setQueueCount(
+                  (current) =>
+                    Math.min(
+                      8,
+                      current + 1
+                    )
+                )
+              }
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: "#353d4b",
+                backgroundColor: "#151920",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text
+                style={{
+                  color: "#ffffff",
+                  fontSize: 22,
+                }}
+              >
+                +
+              </Text>
+            </Pressable>
+
+            <Text
+              style={{
+                color: "#727a88",
+                fontSize: 10,
+                flex: 1,
+                lineHeight: 15,
+              }}
+            >
+              Separate jobs, max 8.
+              Queue above 1 requires Batch 1.
+            </Text>
+          </View>
 
           <Pressable
             onPress={
