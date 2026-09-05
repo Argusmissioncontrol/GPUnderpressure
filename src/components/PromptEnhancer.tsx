@@ -148,7 +148,7 @@ export function PromptEnhancer({ modelKey, prompt, disabled = false, onChangePro
                 <Text style={styles.dropdownValue}>
                   {catalog.promptFormats.find((item) => item.key === promptFormat)?.label ?? promptFormat}
                 </Text>
-                <Text style={styles.dropdownArrow}>{formatOpen ? "â–²" : "â–¼"}</Text>
+                <Text style={styles.dropdownArrow}>{formatOpen ? "\u25B2" : "\u25BC"}</Text>
               </Pressable>
               {formatOpen && (
                 <View style={styles.dropdownMenu}>

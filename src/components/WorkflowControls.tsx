@@ -214,7 +214,7 @@ function ChoiceSelector({
         style={[styles.dropdownButton, open && styles.dropdownButtonOpen]}
       >
         <Text style={styles.dropdownValue}>{value}</Text>
-        <Text style={styles.dropdownArrow}>{open ? "â–²" : "â–¼"}</Text>
+        <Text style={styles.dropdownArrow}>{open ? "\u25B2" : "\u25BC"}</Text>
       </Pressable>
 
       {open && (
