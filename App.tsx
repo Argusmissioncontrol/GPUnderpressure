@@ -680,6 +680,17 @@ export default function App() {
         }
         keyboardShouldPersistTaps="handled"
       >
+        <Image
+          source={require("./assets/gpunder-banner.png")}
+          resizeMode="cover"
+          style={{
+            width: "100%",
+            height: 118,
+            borderRadius: 16,
+            marginBottom: 12,
+          }}
+        />
+
         <View
           style={
             styles.header
